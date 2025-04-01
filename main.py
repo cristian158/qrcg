@@ -287,11 +287,16 @@ class QRGeneratorWindow(Gtk.Window):
             eye_drawer = self._get_module_drawer(eye_style)
             eye_frame_drawer = self._get_module_drawer(eye_frame_style)
 
-            # Create color mask
-            color_mask = RadialGradiantColorMask(
-                back_color=(255, 255, 255),
-                center_color=(0, 0, 0),
-                edge_color=(0, 0, 0)
+            # Get colors from UI and convert to RGB
+            fg_color = self.get_color_hex(self.fg_color_button)
+            bg_color = self.get_color_hex(self.bg_color_button)
+            fg_rgb = tuple(int(fg_color[i:i+2], 16) for i in (1, 3, 5))
+            bg_rgb = tuple(int(bg_color[i:i+2], 16) for i in (1, 3, 5))
+
+            # Create color mask with selected colors
+            color_mask = SolidFillColorMask(
+                front_color=fg_rgb,
+                back_color=bg_rgb
             )
 
             # Create QR code with styled image
@@ -316,48 +321,60 @@ class QRGeneratorWindow(Gtk.Window):
 
             # Add logo if selected
             if self.logo_path:
-                logo = Image.open(self.logo_path)
-                logo = logo.convert("RGBA")
+                try:
+                    logo = Image.open(self.logo_path)
+                    logo = logo.convert("RGBA")
 
-                # Optimize logo processing
-                size_percent = self.logo_size_scale.get_value() / 100
-                basewidth = int(self.qr_image.size[0] * size_percent)
-                wpercent = (basewidth / float(logo.size[0]))
-                hsize = int((float(logo.size[1]) * float(wpercent)))
-                logo = logo.resize((basewidth, hsize), Image.Resampling.LANCZOS)
+                    # Optimize logo processing
+                    size_percent = self.logo_size_scale.get_value() / 100
+                    basewidth = int(self.qr_image.size[0] * size_percent)
+                    wpercent = (basewidth / float(logo.size[0]))
+                    hsize = int((float(logo.size[1]) * float(wpercent)))
+                    logo = logo.resize((basewidth, hsize), Image.Resampling.LANCZOS)
 
-                if self.logo_radius.get_value() > 0:
-                    from PIL import ImageDraw
-                    mask = Image.new('L', logo.size, 0)
-                    draw = ImageDraw.Draw(mask)
-                    radius = int(self.logo_radius.get_value())
-                    draw.rounded_rectangle([0, 0, logo.size[0], logo.size[1]], radius, fill=255)
-                    logo.putalpha(mask)
+                    if self.logo_radius.get_value() > 0:
+                        from PIL import ImageDraw
+                        mask = Image.new('L', logo.size, 0)
+                        draw = ImageDraw.Draw(mask)
+                        radius = int(self.logo_radius.get_value())
+                        draw.rounded_rectangle([0, 0, logo.size[0], logo.size[1]], radius, fill=255)
+                        logo.putalpha(mask)
 
-                pos = ((self.qr_image.size[0] - logo.size[0]) // 2,
-                    (self.qr_image.size[1] - logo.size[1]) // 2)
+                    pos = ((self.qr_image.size[0] - logo.size[0]) // 2,
+                        (self.qr_image.size[1] - logo.size[1]) // 2)
 
-                self.qr_image.paste(logo, pos, logo)
+                    self.qr_image.paste(logo, pos, logo)
+                except Exception as e:
+                    self.status_label.set_text(f"Error processing logo: {e}")
+                    self.logo_path = None
+                    return
 
             # Optimize preview display
             self.status_label.set_text("Generating preview...")
             while Gtk.events_pending():
                 Gtk.main_iteration()
 
-            buffer = io.BytesIO()
-            preview_size = (300, 300)
-            preview_image = self.qr_image.copy()
-            preview_image.thumbnail(preview_size, Image.Resampling.LANCZOS)
-            preview_image.save(buffer, format='PNG', optimize=True)
-            buffer.seek(0)
+            try:
+                buffer = io.BytesIO()
+                # Calculate preview size based on window size
+                window_width = self.get_width()
+                window_height = self.get_height()
+                preview_size = (min(window_width - 40, 300), min(window_height - 200, 300))
+                preview_image = self.qr_image.copy()
+                preview_image.thumbnail(preview_size, Image.Resampling.LANCZOS)
+                preview_image.save(buffer, format='PNG', optimize=True)
+                buffer.seek(0)
 
-            loader = GdkPixbuf.PixbufLoader.new_with_type('png')
-            loader.write(buffer.read())
-            loader.close()
+                loader = GdkPixbuf.PixbufLoader.new_with_type('png')
+                loader.write(buffer.read())
+                loader.close()
 
-            pixbuf = loader.get_pixbuf()
-            self.image.set_from_pixbuf(pixbuf)
-            self.status_label.set_text("QR code generated successfully!")
+                pixbuf = loader.get_pixbuf()
+                self.image.set_from_pixbuf(pixbuf)
+                self.status_label.set_text("QR code generated successfully!")
+            except Exception as e:
+                self.status_label.set_text(f"Error generating preview: {e}")
+                return
 
         except Exception as e:
             self.status_label.set_text(f"Error generating QR code: {e}")
